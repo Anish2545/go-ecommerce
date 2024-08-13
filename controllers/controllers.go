@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	generate "github.com/Anish2545/go-ecommerce/tokens"
 	"github.com/Anish2545/go-ecommerce/database"
 	"github.com/Anish2545/go-ecommerce/models"
 	"github.com/gin-gonic/gin"
@@ -49,17 +50,17 @@ func Signup() gin.HandlerFunc {
 
 		var user models.User
 		if err := c.BindJSON(&user); err != nil {
-			c.JSON{http.StatusBadRequest, gin.H{"error": err.Error()}}
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
 		validationErr := Validate.Struct(user)
 		if validationErr != nil {
-			c.JSON{http.StatusBadRequest, gin.H{"error": validationErr}}
+			c.JSON(http.StatusBadRequest, gin.H{"error": validationErr})
 			return
 		}
 
-		count,err := UserCollection.CountDocuments(ctx,bson.M{"email":user.Email})
+		count,err := userCollection.CountDocuments(ctx,bson.M{"email":user.Email})
 
 		if err !=nil{
 			log.Panic(err)
@@ -71,7 +72,7 @@ func Signup() gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest,gin.H{"error":"User already exists"})
 		}
 
-		count,err = UserCollection.CountDocuments(ctx,bson.M{"phone":user.Phone})
+		count,err = userCollection.CountDocuments(ctx,bson.M{"phone":user.Phone})
 		defer cancel()
 
 		if err !=nil{
@@ -99,7 +100,7 @@ func Signup() gin.HandlerFunc {
 		user.Address_Details = make([]models.Address, 0)
 		user.Order_Status = make([]models.Order, 0)
 
-		_,inserterr := UserCollection.InsertOne(ctx,user)
+		_,inserterr := userCollection.InsertOne(ctx,user)
 
 		if inserterr != nil{
 			c.JSON(http.StatusInternalServerError , gin.H{"error":"the user did not get created"})
@@ -115,14 +116,14 @@ func Login() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var ctx,cancel = context.WithTimeout(context.Background(),100*time.Second)
 		defer cancel()
-
+		var founduser models.User
 		var user models.User
 		if err := c.BindJSON(&user); err!=nil{
 			c.JSON(http.StatusBadRequest,gin.H{"error":err})
 			return
 		}
 
-		err := UserCollection.FindOne(ctx,bson.M{"email":user.Email}).Decode(&founduser)
+		err := userCollection.FindOne(ctx,bson.M{"email":user.Email}).Decode(&founduser)
 		defer cancel()
 
 		if err!=nil {
@@ -130,7 +131,7 @@ func Login() gin.HandlerFunc {
 			return
 		}
 
-		PasswordIsValid,msg := VerifyPassword(*user.Password,*founduser)
+		PasswordIsValid,msg := VerifyPassword(*user.Password,*founduser.Password)
 
 		defer cancel()
 
@@ -149,7 +150,23 @@ func Login() gin.HandlerFunc {
 }
 
 func ProductViewAdmin() gin.HandlerFunc {
-
+	return func(c *gin.Context) {
+		var ctx,cancel = context.WithTimeout(context.Background(),100*time.Second)
+		var products models.Product
+		defer cancel()
+		if err := c.BindJSON(&products);err!=nil{
+			c.JSON(http.StatusInternalServerError,gin.H{"error":err.Error()})
+			return
+		}
+		products.Product_ID = primitive.NewObjectID()
+		_,anyerr := ProductCollection.InsertOne(ctx,products)
+		if anyerr!=nil{
+			c.JSON(http.StatusInternalServerError,gin.H{"error":"not inserted"})
+			return
+		}
+		defer cancel()
+		c.JSON(http.StatusOK,"successfully added")
+	}
 }
 
 func SearchProduct() gin.HandlerFunc {
@@ -172,9 +189,9 @@ func SearchProduct() gin.HandlerFunc {
 			return
 		}
 
-		defer cursor.Close()
+		defer cursor.Close(ctx)
 
-		if err := cursor.err();err!=nil{
+		if err := cursor.Err();err!=nil{
 			log.Println(err)
 			c.IndentedJSON(400,"Invalid")
 			return
